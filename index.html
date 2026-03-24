@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Greg's Agent</title>
+
+<!-- CONFIG — update WORKER_URL and AGENT_TOKEN after deploying your Cloudflare Worker -->
+<script>
+  const CONFIG = {
+    WORKER_URL: 'https://YOUR_WORKER_NAME.YOUR_SUBDOMAIN.workers.dev',
+    AGENT_TOKEN: 'PASTE_YOUR_SECRET_TOKEN_HERE',
+    MCP_GMAIL: 'https://gmail.mcp.claude.com/mcp',
+    MCP_GCAL:  'https://gcal.mcp.claude.com/mcp',
+  };
+</script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0e0f11;
+    --surface: #16181c;
+    --surface2: #1e2026;
+    --surface3: #252830;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.12);
+    --text: #e8eaf0;
+    --muted: #7a7e8a;
+    --accent: #5b8df5;
+    --accent2: #3d6fe0;
+    --teal: #3ecfb2;
+    --amber: #f5a623;
+    --coral: #f07060;
+    --green: #4cbb8a;
+    --font: 'DM Sans', sans-serif;
+    --mono: 'DM Mono', monospace;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .header-left { display: flex; align-items: center; gap: 12px; }
+
+  .logo-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px var(--accent);
+    animation: pulse 2.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%,100% { opacity:1; box-shadow: 0 0 8px var(--accent); }
+    50% { opacity:.7; box-shadow: 0 0 16px var(--accent); }
+  }
+
+  .header-title { font-size: 15px; font-weight: 500; letter-spacing: -0.2px; }
+  .header-subtitle { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  .header-tools { display: flex; align-items: center; gap: 6px; }
+
+  .tool-pill {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--muted);
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 20px; padding: 4px 10px; transition: all 0.2s;
+  }
+  .tool-pill.active { color: var(--teal); border-color: rgba(62,207,178,0.3); background: rgba(62,207,178,0.06); }
+  .tool-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  .sidebar {
+    width: 200px; border-right: 1px solid var(--border);
+    background: var(--surface); display: flex; flex-direction: column;
+    padding: 12px 8px; gap: 2px; flex-shrink: 0;
+  }
+
+  .sidebar-label {
+    font-size: 10px; font-weight: 500; color: var(--muted);
+    letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 10px 4px;
+  }
+
+  .mode-btn {
+    display: flex; align-items: center; gap: 9px; padding: 9px 10px;
+    border-radius: var(--radius-sm); cursor: pointer; font-size: 13px;
+    color: var(--muted); transition: all 0.15s; border: none; background: none;
+    width: 100%; text-align: left;
+  }
+  .mode-btn:hover { background: var(--surface2); color: var(--text); }
+  .mode-btn.active { background: rgba(91,141,245,0.12); color: var(--accent); }
+  .mode-icon { font-size: 14px; width: 18px; text-align: center; }
+
+  .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  .messages {
+    flex: 1; overflow-y: auto; padding: 20px;
+    display: flex; flex-direction: column; gap: 16px;
+    scrollbar-width: thin; scrollbar-color: var(--surface3) transparent;
+  }
+  .messages::-webkit-scrollbar { width: 4px; }
+  .messages::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 4px; }
+
+  .welcome {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; flex: 1; text-align: center; gap: 16px; padding: 40px 20px;
+  }
+  .welcome-avatar {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--teal));
+    display: flex; align-items: center; justify-content: center; font-size: 22px; margin-bottom: 4px;
+  }
+  .welcome h2 { font-size: 20px; font-weight: 500; letter-spacing: -0.3px; }
+  .welcome p { font-size: 14px; color: var(--muted); max-width: 380px; line-height: 1.6; }
+
+  .suggestion-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; max-width: 540px; margin-top: 8px; }
+
+  .suggestion-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 14px; cursor: pointer;
+    text-align: left; transition: all 0.2s;
+  }
+  .suggestion-card:hover { border-color: var(--border2); background: var(--surface2); transform: translateY(-1px); }
+  .suggestion-card .s-icon { font-size: 16px; margin-bottom: 6px; }
+  .suggestion-card .s-title { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 3px; }
+  .suggestion-card .s-sub { font-size: 11px; color: var(--muted); line-height: 1.4; }
+
+  .message {
+    display: flex; gap: 12px; max-width: 720px;
+    animation: msgIn 0.2s ease-out;
+  }
+  @keyframes msgIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+  .message.user { align-self: flex-end; flex-direction: row-reverse; max-width: 600px; }
+
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500;
+  }
+  .avatar.assistant { background: linear-gradient(135deg, var(--accent), var(--teal)); color: white; }
+  .avatar.user { background: var(--surface3); color: var(--text); border: 1px solid var(--border2); }
+
+  .bubble { padding: 12px 16px; border-radius: var(--radius); font-size: 14px; line-height: 1.65; max-width: 100%; }
+  .message.assistant .bubble { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 4px var(--radius) var(--radius) var(--radius); }
+  .message.user .bubble { background: var(--accent2); color: white; border-radius: var(--radius) 4px var(--radius) var(--radius); }
+
+  .tool-call {
+    display: flex; align-items: center; gap: 7px; font-size: 11px;
+    color: var(--muted); font-family: var(--mono); background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;
+    margin-bottom: 8px; width: fit-content;
+  }
+  .tool-call .tc-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--teal); flex-shrink: 0; }
+  .tool-call.loading .tc-dot { animation: blink 1s ease-in-out infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  .typing { display: flex; gap: 4px; align-items: center; padding: 4px 0; }
+  .typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: type 1.2s ease-in-out infinite; }
+  .typing span:nth-child(2) { animation-delay: .2s; }
+  .typing span:nth-child(3) { animation-delay: .4s; }
+  @keyframes type { 0%,60%,100%{transform:translateY(0);opacity:.4} 30%{transform:translateY(-4px);opacity:1} }
+
+  .input-area { padding: 16px 20px; border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+  .input-row {
+    display: flex; gap: 10px; align-items: flex-end;
+    background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: var(--radius); padding: 10px 12px; transition: border-color 0.2s;
+  }
+  .input-row:focus-within { border-color: rgba(91,141,245,0.4); }
+  #userInput { flex:1; background:none; border:none; outline:none; color:var(--text); font-family:var(--font); font-size:14px; resize:none; min-height:22px; max-height:120px; line-height:1.5; }
+  #userInput::placeholder { color: var(--muted); }
+  .send-btn { width:32px; height:32px; border-radius:8px; background:var(--accent); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.15s; flex-shrink:0; }
+  .send-btn:hover { background:var(--accent2); transform:scale(1.05); }
+  .send-btn:disabled { background:var(--surface3); cursor:not-allowed; transform:none; }
+  .input-hint { font-size:11px; color:var(--muted); margin-top:8px; text-align:center; }
+
+  .bubble strong { color: var(--accent); font-weight: 500; }
+  .bubble em { color: var(--muted); font-style: normal; font-size: 0.92em; }
+  .bubble ul { padding-left: 18px; margin: 6px 0; }
+  .bubble li { margin: 3px 0; }
+  .bubble code { font-family: var(--mono); font-size:12px; background:var(--surface3); padding:1px 5px; border-radius:4px; color:var(--teal); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="logo-dot"></div>
+    <div>
+      <div class="header-title">Hey Greg 👋</div>
+      <div class="header-subtitle">Your personal assistant — ready to go</div>
+    </div>
+  </div>
+  <div class="header-tools">
+    <div class="tool-pill active"><div class="tool-dot"></div> Gmail</div>
+    <div class="tool-pill active"><div class="tool-dot"></div> Calendar</div>
+    <div class="tool-pill active"><div class="tool-dot"></div> Web search</div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-label">Mode</div>
+    <button class="mode-btn active" onclick="setMode('general', this)"><span class="mode-icon">💬</span> General</button>
+    <button class="mode-btn" onclick="setMode('work', this)"><span class="mode-icon">✈️</span> Aviation work</button>
+    <button class="mode-btn" onclick="setMode('sailboat', this)"><span class="mode-icon">⛵</span> Sailboat biz</button>
+    <button class="mode-btn" onclick="setMode('personal', this)"><span class="mode-icon">📅</span> Schedule</button>
+    <div class="sidebar-label" style="margin-top:8px">Quick actions</div>
+    <button class="mode-btn" onclick="quickPrompt('Check my Gmail inbox for anything urgent today')"><span class="mode-icon">📬</span> Inbox check</button>
+    <button class="mode-btn" onclick="quickPrompt('What\'s on my Google Calendar today and tomorrow?')"><span class="mode-icon">📆</span> Today's agenda</button>
+    <button class="mode-btn" onclick="quickPrompt('Draft a professional email for me — ask me what it should say')"><span class="mode-icon">✍️</span> Draft email</button>
+    <button class="mode-btn" onclick="quickPrompt('Search for the latest FAA news on eVTOL or AAM certification updates')"><span class="mode-icon">🔍</span> eVTOL news</button>
+  </div>
+
+  <div class="chat-area">
+    <div class="messages" id="messages"></div>
+    <div class="input-area">
+      <div class="input-row">
+        <textarea id="userInput" placeholder="Ask me anything — work, sailboat biz, schedule, research..." rows="1"
+          onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M14 8L2 2L5.5 8L2 14L14 8Z" fill="white"/></svg>
+        </button>
+      </div>
+      <div class="input-hint">Gmail · Calendar · Web search · Drafting · Research</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let conversationHistory = [];
+  let isLoading = false;
+  let currentMode = 'general';
+
+  const modeSystemPrompts = {
+    general: `You are Greg's personal AI assistant — casual, sharp, and genuinely helpful. Greg works in aviation/eVTOL at AirCert Global, does executive communications work, and runs a charter sailboat company near Dayton, Ohio. Keep your tone casual and conversational. Be direct and practical. Don't over-explain.`,
+    work: `You are Greg's aviation industry assistant. He works at AirCert Global on FAA certification and eVTOL work, and has done executive comms for major players like Joby Aviation. Help with industry research, drafting communications, FAA/eIPP policy news, exec quotes, and certification developments. Use web search for current news.`,
+    sailboat: `You are Greg's sailboat business assistant. He runs a charter sailboat company near Dayton, Ohio. Help with client comms, bookings, website copy (Squarespace), marketing, pricing, and seasonal scheduling.`,
+    personal: `You are Greg's personal scheduler and life assistant. Help him manage his Google Calendar, draft personal emails, plan his week. He's in Dayton, Ohio.`
+  };
+
+  const suggestions = [
+    { icon: '📬', title: 'Check my inbox', sub: 'Scan Gmail for anything urgent', prompt: 'Check my Gmail inbox for anything urgent today' },
+    { icon: '📅', title: "Today's schedule", sub: "Pull up what's on my calendar", prompt: "What's on my Google Calendar today and tomorrow?" },
+    { icon: '✈️', title: 'eVTOL/FAA news', sub: 'Latest on AAM certification', prompt: 'Search for the latest news on eVTOL, AAM, or FAA certification updates this week' },
+    { icon: '⛵', title: 'Sailboat biz help', sub: 'Bookings, website copy, emails', prompt: "Let's work on something for my charter sailboat business" },
+  ];
+
+  function renderWelcome() {
+    const msgs = document.getElementById('messages');
+    msgs.innerHTML = `
+      <div class="welcome" id="welcome">
+        <div class="welcome-avatar">🧭</div>
+        <h2>What can I help with today?</h2>
+        <p>Gmail, Calendar, and web search are all hooked up. Ask me anything — work stuff, sailboat biz, scheduling, drafts, research.</p>
+        <div class="suggestion-grid">
+          ${suggestions.map(s => `
+            <div class="suggestion-card" onclick="quickPrompt('${s.prompt}')">
+              <div class="s-icon">${s.icon}</div>
+              <div class="s-title">${s.title}</div>
+              <div class="s-sub">${s.sub}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+  }
+
+  function setMode(mode, btn) {
+    currentMode = mode;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const labels = { general: 'General', work: 'Aviation mode', sailboat: 'Sailboat biz mode', personal: 'Schedule mode' };
+    if (conversationHistory.length > 0) addSystemNote(`Switched to ${labels[mode]}`);
+  }
+
+  function addSystemNote(text) {
+    const msgs = document.getElementById('messages');
+    const note = document.createElement('div');
+    note.style.cssText = 'text-align:center;font-size:11px;color:var(--muted);padding:4px 0;';
+    note.textContent = `— ${text} —`;
+    msgs.appendChild(note);
+    scrollBottom();
+  }
+
+  function quickPrompt(text) { document.getElementById('userInput').value = text; sendMessage(); }
+  function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
+  function handleKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+  function scrollBottom() { const m = document.getElementById('messages'); m.scrollTop = m.scrollHeight; }
+
+  function addMessage(role, content) {
+    document.getElementById('welcome')?.remove();
+    const msgs = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = `message ${role}`;
+    div.innerHTML = `<div class="avatar ${role}">${role === 'assistant' ? 'AI' : 'G'}</div><div class="bubble">${content}</div>`;
+    msgs.appendChild(div);
+    scrollBottom();
+    return div.querySelector('.bubble');
+  }
+
+  function addToolIndicator(text, loading = false) {
+    document.getElementById('welcome')?.remove();
+    const msgs = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.style.cssText = 'padding-left:42px;';
+    div.innerHTML = `<div class="tool-call ${loading ? 'loading' : ''}"><div class="tc-dot"></div>${text}</div>`;
+    msgs.appendChild(div);
+    scrollBottom();
+    return div;
+  }
+
+  function showTyping() {
+    document.getElementById('welcome')?.remove();
+    const msgs = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.id = 'typing-indicator';
+    div.className = 'message assistant';
+    div.innerHTML = `<div class="avatar assistant">AI</div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+    msgs.appendChild(div);
+    scrollBottom();
+  }
+
+  function removeTyping() { document.getElementById('typing-indicator')?.remove(); }
+
+  function formatContent(text) {
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/`(.*?)`/g, '<code>$1</code>')
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n- /g, '<br>• ')
+      .replace(/\n/g, '<br>')
+      .replace(/^/, '<p>')
+      .replace(/$/, '</p>');
+  }
+
+  async function sendMessage() {
+    if (isLoading) return;
+    const input = document.getElementById('userInput');
+    const text = input.value.trim();
+    if (!text) return;
+
+    input.value = '';
+    input.style.height = 'auto';
+    document.getElementById('sendBtn').disabled = true;
+    isLoading = true;
+
+    addMessage('user', text);
+    conversationHistory.push({ role: 'user', content: text });
+    showTyping();
+
+    const toolIndicator = addToolIndicator('Thinking...', true);
+
+    try {
+      const body = {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: modeSystemPrompts[currentMode],
+        messages: conversationHistory,
+        mcp_servers: [
+          { type: 'url', url: CONFIG.MCP_GMAIL, name: 'gmail' },
+          { type: 'url', url: CONFIG.MCP_GCAL,  name: 'gcal' }
+        ],
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }]
+      };
+
+      const response = await fetch(CONFIG.WORKER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Agent-Token': CONFIG.AGENT_TOKEN,
+        },
+        body: JSON.stringify(body),
+      });
+
+      toolIndicator.remove();
+      removeTyping();
+
+      if (!response.ok) throw new Error(`Error ${response.status}`);
+      const data = await response.json();
+
+      const toolUses = data.content?.filter(b => b.type === 'mcp_tool_use' || b.type === 'tool_use') || [];
+      toolUses.forEach(t => {
+        let label = `Used: ${t.name}`;
+        if (t.name?.includes('gmail') || t.name?.includes('mail')) label = 'Checked Gmail';
+        else if (t.name?.includes('calendar') || t.name?.includes('gcal')) label = 'Checked Google Calendar';
+        else if (t.name?.includes('search')) label = 'Searched the web';
+        addToolIndicator(label);
+      });
+
+      const fullText = (data.content?.filter(b => b.type === 'text') || []).map(b => b.text).join('\n').trim();
+      if (fullText) {
+        addMessage('assistant', formatContent(fullText));
+        conversationHistory.push({ role: 'assistant', content: fullText });
+      }
+
+    } catch (err) {
+      toolIndicator.remove();
+      removeTyping();
+      addMessage('assistant', `<strong>Hit a snag:</strong> ${err.message}<br><br>Check that your Worker URL and token are set correctly in the CONFIG block at the top of index.html.`);
+    }
+
+    document.getElementById('sendBtn').disabled = false;
+    isLoading = false;
+  }
+
+  renderWelcome();
+  document.getElementById('userInput').focus();
+</script>
+</body>
+</html>
